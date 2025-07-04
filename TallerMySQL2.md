@@ -481,10 +481,226 @@ GROUP BY prov.id;
 ## Subconsultas
 
 ```sql
-SELECT id, total
+SELECT p.id, p.nombre AS Producto, p.precio AS Precio, p.tipoproducto_id AS Categoria 
+FROM productos p 
+WHERE p.precio = ( 
+    SELECT MAX(p2.precio)     
+    FROM productos p2     
+    WHERE p2.tipoproducto_id = p.tipoproducto_id 
+);
+
+SELECT c.id, c.nombre,
+(
+    SELECT COUNT(*)
+    FROM Pedidos p
+    WHERE p.cliente_id = c.id
+) AS total_pedidos
+FROM Clientes c
+ORDER BY total_pedidos DESC
+LIMIT 1;
+
+SELECT id, nombre, salario, puesto_id, fecha_contrato
+FROM DatosEmpleados
+WHERE salario > (
+    SELECT AVG(salario)
+    FROM DatosEmpleados
+);
+
+SELECT prod.id, prod.nombre, prod.precio, prod.proveedor_id, prod.tipoproducto_id, COUNT(dp.id) AS veces_pedido
+FROM Productos prod
+JOIN DetallesPedidos dp ON prod.id = dp.producto_id
+GROUP BY prod.id, prod.nombre, prod.precio, prod.proveedor_id, prod.tipoproducto_id
+HAVING COUNT(dp.id) > 5;
+
+SELECT id, cliente_id, fecha, total
 FROM Pedidos
 WHERE total > (
-	SELECT AVG(total)
+    SELECT AVG(total)
     FROM Pedidos
 );
+
+SELECT p.id, p.cliente_id, p.fecha
+FROM Pedidos p
+WHERE (
+    SELECT SUM(dp.precio * dp.cantidad)
+    FROM DetallesPedidos dp
+    WHERE dp.pedido_id = p.id
+) > (
+    SELECT AVG(subtotal)
+    FROM (
+        SELECT SUM(precio * cantidad) AS subtotal
+        FROM DetallesPedidos
+        GROUP BY pedido_id
+    ) AS sub
+);
+
+
+SELECT p.id, p.nombre, p.precio, p.tipoproducto_id
+FROM Productos p
+WHERE p.precio > (
+    SELECT AVG(p2.precio)
+    FROM Productos p2
+    WHERE p2.tipoproducto_id = p.tipoproducto_id
+);
+
+SELECT c.id, c.nombre, COUNT(p.id) AS total_pedidos
+FROM Clientes c
+JOIN Pedidos p ON c.id = p.cliente_id
+GROUP BY c.id, c.nombre
+HAVING COUNT(p.id) > (
+    SELECT AVG(pedidos_por_cliente)
+    FROM (
+        SELECT COUNT(*) AS pedidos_por_cliente
+        FROM Pedidos
+        GROUP BY cliente_id
+    ) AS sub
+);
+
+SELECT id, nombre, precio, proveedor_id, tipoproducto_id
+FROM Productos
+WHERE precio > (
+    SELECT AVG(precio)
+    FROM Productos
+);
+
+SELECT e.id, e.nombre, e.salario, e.puesto_id, e.fecha_contrato
+FROM DatosEmpleados e
+WHERE e.salario < (
+    SELECT AVG(e2.salario)
+    FROM DatosEmpleados e2
+    WHERE e2.puesto_id = e.puesto_id
+);
 ```
+
+
+
+## Procedimientos Almacenados
+
+```sql
+DELIMITER $$
+CREATE PROCEDURE ActualizarPrecioProveedor(
+    IN proveedor INT,
+    IN nuevo_precio DECIMAL(10,2)
+)
+BEGIN
+    UPDATE Productos
+    SET precio = nuevo_precio
+    WHERE proveedor_id = proveedor;
+END $$
+DELIMITER ;
+
+DELIMITER $$
+CREATE PROCEDURE ObtenerDireccionCliente(
+    IN cliente_id INT
+)
+BEGIN
+    SELECT u.dirección
+    FROM Clientes c
+    JOIN Ubicaciones u ON c.ubicación_id = u.id
+    WHERE c.id = cliente_id;
+END $$
+DELIMITER ;
+
+DELIMITER $$
+CREATE PROCEDURE RegistrarPedido(
+    IN cliente INT,
+    IN fecha_pedido DATE,
+    IN total_pedido DECIMAL(10,2),
+    IN producto INT,
+    IN cantidad INT,
+    IN precio_unitario DECIMAL(10,2)
+)
+BEGIN
+    DECLARE pedido_id INT;
+
+    INSERT INTO Pedidos(cliente_id, fecha, total)
+    VALUES (cliente, fecha_pedido, total_pedido);
+
+    SET pedido_id = LAST_INSERT_ID();
+
+    INSERT INTO DetallesPedidos(pedido_id, producto_id, cantidad, precio)
+    VALUES (pedido_id, producto, cantidad, precio_unitario);
+END $$
+DELIMITER ;
+
+DELIMITER $$
+CREATE PROCEDURE TotalVentasCliente(
+    IN cliente_id INT
+)
+BEGIN
+    SELECT SUM(total) AS total_ventas
+    FROM Pedidos
+    WHERE cliente_id = cliente_id;
+END $$
+DELIMITER ;
+
+DELIMITER $$
+CREATE PROCEDURE EmpleadosPorPuesto(
+    IN id_puesto INT
+)
+BEGIN
+    SELECT id, nombre, salario, fecha_contrato
+    FROM DatosEmpleados
+    WHERE puesto_id = id_puesto;
+END $$
+DELIMITER ;
+
+DELIMITER $$
+CREATE PROCEDURE ActualizarSalarioPorPuesto(
+    IN id_puesto INT,
+    IN nuevo_salario DECIMAL(10,2)
+)
+BEGIN
+    UPDATE DatosEmpleados
+    SET salario = nuevo_salario
+    WHERE puesto_id = id_puesto;
+END $$
+DELIMITER ;
+
+DELIMITER $$
+CREATE PROCEDURE PedidosEntreFechas(
+    IN fecha_inicio DATE,
+    IN fecha_fin DATE
+)
+BEGIN
+    SELECT id, cliente_id, fecha, total
+    FROM Pedidos
+    WHERE fecha BETWEEN fecha_inicio AND fecha_fin;
+END $$
+DELIMITER ;
+
+DELIMITER $$
+CREATE PROCEDURE AplicarDescuentoCategoria(
+    IN tipo_producto_id INT,
+    IN porcentaje_descuento DECIMAL(5,2)
+)
+BEGIN
+    UPDATE Productos
+    SET precio = precio - (precio * porcentaje_descuento / 100)
+    WHERE tipoproducto_id = tipo_producto_id;
+END $$
+DELIMITER ;
+
+DELIMITER $$
+CREATE PROCEDURE ProveedoresPorTipoProducto(
+    IN tipo_id INT
+)
+BEGIN
+    SELECT DISTINCT p.id, p.nombre
+    FROM Proveedores p
+    JOIN Productos prod ON p.id = prod.proveedor_id
+    WHERE prod.tipoproducto_id = tipo_id;
+END $$
+DELIMITER ;
+
+DELIMITER $$
+CREATE PROCEDURE PedidoMayorValor()
+BEGIN
+    SELECT id, cliente_id, fecha, total
+    FROM Pedidos
+    ORDER BY total DESC
+    LIMIT 1;
+END $$
+DELIMITER ;
+```
+
